@@ -1,11 +1,7 @@
-groq
-python-dotenv
-phi
 fastapi
+toml
 uvicorn
-pydantic
-qdrant-client
-sentence-transformers
-pydantic
-jinja2
-httpx
+phidata
+groq
+qdrant_client
+sentence_transformers
