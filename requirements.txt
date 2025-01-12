@@ -1,3 +1,11 @@
 groq
 python-dotenv
 phi
+fastapi
+uvicorn
+pydantic
+qdrant-client
+sentence-transformers
+pydantic
+jinja2
+httpx
