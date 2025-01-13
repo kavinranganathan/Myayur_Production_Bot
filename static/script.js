@@ -1,6 +1,6 @@
 // Constants
 const CHAT_CONFIG = {
-    API_URL: 'http://localhost:8000',
+    API_URL: 'https://myayur-production-bot.onrender.com',
     BOT_NAME: 'MyAyur Health Assistant',
     TYPING_DELAY: 300,
     MAX_RETRIES: 3,
