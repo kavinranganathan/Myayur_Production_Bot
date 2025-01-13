@@ -12,7 +12,6 @@
     <button id="chatbot-icon" aria-label="Toggle chat" onclick="toggleChat()">
         💬
     </button>
-
     <!-- Chat Interface -->
     <div id="chat-container" aria-live="polite">
         <div id="chat-header">
@@ -21,22 +20,21 @@
         </div>
         <div id="chat-box" role="log"></div>
         <div id="chat-input">
-            <input 
-                type="text" 
+            <textarea 
                 id="user-input" 
                 placeholder="Type your message here..." 
                 aria-label="Chat message"
-            >
+                rows="1"
+            ></textarea>
             <button 
                 id="send-button" 
                 onclick="sendMessage()" 
                 aria-label="Send message"
             >
-                Send
+                ➤
             </button>
         </div>
     </div>
-
     <!-- Scripts -->
     <script src="{{ url_for('static', path='/script.js') }}"></script>
 </body>
