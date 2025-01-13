@@ -99,7 +99,6 @@ body {
     scroll-behavior: smooth;
 }
 
-/* Message styles */
 .message {
     max-width: 80%;
     margin-bottom: 1rem;
@@ -108,7 +107,10 @@ body {
     font-size: 0.9375rem;
     line-height: 1.5;
     position: relative;
+    word-wrap: break-word;    /* Ensures wrapping of long words */
+    white-space: normal;      /* Allows text to wrap across multiple lines */
 }
+
 
 .user-message {
     background-color: var(--primary-color);
@@ -127,15 +129,18 @@ body {
     border-left: 4px solid var(--primary-color);
 }
 
-/* Input area */
+/* Input area with flexbox column layout */
 #chat-input {
     padding: 1rem;
     background-color: var(--bg-primary);
     border-top: 1px solid var(--border-color);
     display: flex;
     gap: 0.75rem;
+    align-items: flex-end; /* Aligns items to bottom */
+    min-height: 60px; /* Minimum height for the input area */
 }
 
+/* Textarea styling */
 #user-input {
     flex: 1;
     padding: 0.75rem 1rem;
@@ -147,33 +152,45 @@ body {
     min-height: 20px;
     max-height: 120px;
     line-height: 1.5;
+    overflow-y: auto;
+    word-wrap: break-word;
+    white-space: pre-wrap;
+    margin-bottom: 0; /* Ensures no extra space at bottom */
 }
 
-#user-input:focus {
-    outline: none;
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.1);
-}
-
+/* Send button styling */
 #send-button {
     background-color: var(--primary-color);
     color: white;
     border: none;
-    padding: 0.75rem 1.25rem;
+    padding: 0.75rem 1rem;
     border-radius: var(--radius);
     font-weight: 500;
     cursor: pointer;
     transition: all 0.2s ease;
     white-space: nowrap;
+    font-size: 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 48px; /* Fixed height */
+    width: 48px; /* Fixed width to maintain square shape */
+    flex-shrink: 0; /* Prevents button from shrinking */
+    margin-bottom: 0; /* Ensures no extra space at bottom */
 }
 
-#send-button:hover {
-    background-color: var(--primary-dark);
-}
-
-#send-button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
+/* Responsive adjustments */
+@media (max-width: 640px) {
+    #chat-input {
+        padding: 0.75rem;
+        gap: 0.5rem;
+    }
+    
+    #send-button {
+        height: 42px;
+        width: 42px;
+        font-size: 1.25rem;
+    }
 }
 
 /* Loading indicator */
