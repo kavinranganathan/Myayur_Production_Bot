@@ -18,7 +18,7 @@ from sentence_transformers import SentenceTransformer
 
 # Contact information constants
 SUPPORT_EMAIL = "support@myayurhealth.com"
-SUPPORT_PHONE = "+1 (555) 123-4567"
+SUPPORT_PHONE = "+1-612-203-7355"
 
 app = FastAPI()
 
