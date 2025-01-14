@@ -17,7 +17,7 @@ from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
 
 # Contact information constants
-SUPPORT_EMAIL = "support@myayurhealth.com"
+SUPPORT_EMAIL = "contactus@myayurhealth.com"
 SUPPORT_PHONE = "+1-612-203-7355"
 
 app = FastAPI()
