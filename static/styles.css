@@ -148,14 +148,15 @@ body {
     border-radius: var(--radius);
     font-size: 0.9375rem;
     transition: all 0.2s ease;
-    resize: none;
-    min-height: 20px;
-    max-height: 120px;
+    resize: none;            /* Prevents manual resizing */
+    min-height: 48px;        /* Minimum height for better control */
+    max-height: 120px;       /* Maximum height */
     line-height: 1.5;
     overflow-y: auto;
     word-wrap: break-word;
     white-space: pre-wrap;
-    margin-bottom: 0; /* Ensures no extra space at bottom */
+    margin-bottom: 0;        /* Ensures no extra space at bottom */
+    box-sizing: border-box;  /* Ensures padding doesn't affect height */
 }
 
 /* Send button styling */
