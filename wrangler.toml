@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: ayurveda-expert-system
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GROQ_API_KEY
+        value: "GROQ_API_KEY="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"
+      - key: QDRANT_URL
+        value: "https://d9d3af35-3db6-4314-9aab-70f063e3ce90.us-east4-0.gcp.cloud.qdrant.io"
+      - key: QDRANT_API_KEY
+        value: "WP6C4JXHI7P959mTsG9yjJXGpEnSE4JhKcyoBdZajaV479oDVGXlEQ"
