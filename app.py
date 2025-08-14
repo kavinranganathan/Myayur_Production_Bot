@@ -2,19 +2,32 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.middleware.cors import CORSMiddleware  # Add this import
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Iterator, Optional
 import json
 import asyncio
 import os
+import logging
 import toml
 from typing import List, Dict, Tuple
 from dataclasses import dataclass
+from pathlib import Path
+from dotenv import load_dotenv
 from phi.agent import Agent
 from phi.model.groq import Groq
 from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
+
+# Configure logging first
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Load environment variables from .env file if it exists
+env_path = Path('.') / '.env'
+if env_path.is_file():
+    load_dotenv(dotenv_path=env_path)
+    logger.info("Loaded environment variables from .env file")
 
 # Contact information constants
 SUPPORT_EMAIL = "contactus@myayurhealth.com"
@@ -56,9 +69,31 @@ class VectorDBService:
                 self.client = QdrantClient(":memory:")
             self.model = SentenceTransformer('all-MiniLM-L6-v2')
             self.collection_name = "myayurhealth_docs"
+            
+            # Check if collection exists, if not create it
+            collections = self.client.get_collections()
+            collection_names = [collection.name for collection in collections.collections]
+            
+            if self.collection_name not in collection_names:
+                # For Qdrant 1.15.1, we need to use the full configuration
+                from qdrant_client.http.models import VectorParams, Distance
+                
+                self.client.recreate_collection(
+                    collection_name=self.collection_name,
+                    vectors_config={
+                        "text": VectorParams(
+                            size=384,  # all-MiniLM-L6-v2 uses 384 dimensions
+                            distance=Distance.COSINE
+                        )
+                    }
+                )
+                logger.info(f"Created new collection: {self.collection_name}")
+            
+            logger.info("Vector DB initialized successfully")
         except Exception as e:
             self.client = None
             self.model = None
+            logger.error(f"Vector DB Initialization Error: {str(e)}")
             raise HTTPException(
                 status_code=500,
                 detail=f"Vector DB Initialization Error: {str(e)}"
@@ -70,7 +105,15 @@ class VectorDBService:
         
         try:
             query_vector = self.model.encode(query).tolist()
-            results = self.client.search(
+            
+            # First check if collection exists and has points
+            collection_info = self.client.get_collection(collection_name=self.collection_name)
+            if collection_info.points_count == 0:
+                logger.warning(f"Collection '{self.collection_name}' is empty. No documents to search.")
+                return []
+                
+            # Perform the search using the correct API
+            search_result = self.client.search(
                 collection_name=self.collection_name,
                 query_vector=query_vector,
                 limit=limit
@@ -78,14 +121,15 @@ class VectorDBService:
             
             return [
                 DocumentResponse(
-                    content=result.payload.get('text', ''),
-                    confidence=float(result.score),
-                    metadata=result.payload.get('metadata', {}),
-                    is_doctor_info='doctor' in result.payload.get('metadata', {}).get('type', '').lower()
+                    content=hit.payload.get('text', ''),
+                    confidence=float(hit.score) if hasattr(hit, 'score') else 0.0,
+                    metadata=hit.payload.get('metadata', {}),
+                    is_doctor_info='doctor' in hit.payload.get('metadata', {}).get('type', '').lower()
                 )
-                for result in results
+                for hit in search_result
             ]
         except Exception as e:
+            logger.error(f"Search Error: {str(e)}")
             raise HTTPException(
                 status_code=500,
                 detail=f"Search Error: {str(e)}"
@@ -97,29 +141,44 @@ class AyurvedaExpertSystem:
             api_url=config.get("QDRANT_URL"),
             api_key=config.get("QDRANT_API_KEY")
         )
-        self.model = Agent(
-            model=Groq(id="llama-3.3-70b-versatile"),
-            stream=True,
-            description="Expert Ayurvedic healthcare assistant",
-            instructions=[
-                "Provide accurate Ayurvedic information based on available documentation",
-                "Only recommend doctors that are explicitly mentioned in the documentation",
-                "For health issues, explain Ayurvedic treatment approaches and recommend relevant doctors",
-                "Be clear when information comes from documentation versus general knowledge"
-            ]
-        )
+        
+        groq_api_key = config.get("GROQ_API_KEY")
+        if not groq_api_key:
+            logger.warning("GROQ_API_KEY not set. Some features may be limited.")
+            self.model = None
+        else:
+            try:
+                self.model = Agent(
+                    model=Groq(
+                        id="llama-3.3-70b-versatile",
+                        api_key=groq_api_key
+                    ),
+                    stream=True,
+                    description="Expert Ayurvedic healthcare assistant",
+                    instructions=[
+                        "Provide accurate Ayurvedic information based on available documentation",
+                        "Only recommend doctors that are explicitly mentioned in the documentation",
+                        "For health issues, explain Ayurvedic treatment approaches and recommend relevant doctors",
+                        "Be clear when information comes from documentation versus general knowledge"
+                    ]
+                )
+                logger.info("Ayurveda Expert System initialized with Groq model")
+            except Exception as e:
+                logger.error(f"Failed to initialize Groq model: {str(e)}")
+                self.model = None
     
     async def process_query(self, query: str) -> Tuple[str, List[DocumentResponse]]:
-        # Check if query is about doctors
-        if any(keyword in query.lower() for keyword in ['doctor', 'practitioner', 'physician', 'vaidya']):
-            return await self.process_doctor_query(query)
-        
-        # Check if query is about health conditions
-        elif any(keyword in query.lower() for keyword in ['treat', 'cure', 'healing', 'medicine', 'therapy', 'disease', 'condition', 'problem', 'pain']):
-            return await self.process_health_query(query)
-        
-        # General query processing
-        return await self.process_general_query(query)
+        logger.info(f"Processing query: {query}")
+        try:
+            if any(keyword in query.lower() for keyword in ['doctor', 'practitioner', 'physician', 'vaidya']):
+                return await self.process_doctor_query(query)
+            elif any(keyword in query.lower() for keyword in ['treat', 'cure', 'healing', 'medicine', 'therapy', 'disease', 'condition', 'problem', 'pain']):
+                return await self.process_health_query(query)
+            else:
+                return await self.process_general_query(query)
+        except Exception as e:
+            logger.error(f"Error processing query: {str(e)}")
+            raise
 
     async def process_doctor_query(self, query: str) -> Tuple[str, List[DocumentResponse]]:
         docs = self.vector_db.search(query)
@@ -159,7 +218,19 @@ class AyurvedaExpertSystem:
 
     async def get_model_response(self, context: str, response_type: str, query: str = "") -> str:
         prompt = self.generate_prompt(context, response_type, query)
-        return (await self.model.arun(prompt)).content
+        logger.info(f"Generated prompt: {prompt[:200]}...")
+        
+        if not self.model:
+            return ("I'm currently operating in limited mode. To get full AI-powered responses, "
+                   f"please set up your GROQ_API_KEY. Contact {SUPPORT_EMAIL} for assistance.")
+        
+        try:
+            response = await self.model.arun(prompt)
+            return response.content
+        except Exception as e:
+            logger.error(f"Model error: {str(e)}")
+            return ("I'm having trouble connecting to the AI service. "
+                   f"Please try again later or contact {SUPPORT_EMAIL} for assistance.")
 
     def generate_prompt(self, context: str, response_type: str, query: str = "") -> str:
         base_contact = f"\n\nFor more information and assistance, contact:\nEmail: {SUPPORT_EMAIL}\nPhone: {SUPPORT_PHONE}"
@@ -175,25 +246,32 @@ class AyurvedaExpertSystem:
         return f"I apologize, but I couldn't find any doctors matching your query in our platform. Please try a different search or contact our support team:\nEmail: {SUPPORT_EMAIL}\nPhone: {SUPPORT_PHONE}"
 
 def load_config():
+    # First try to load from environment variables (which can be set in .env file)
     config = {
-        "QDRANT_URL": "http://localhost:6333",
-        "QDRANT_API_KEY": ""
+        "QDRANT_URL": os.getenv("QDRANT_URL", "https://5b0cccfe-e220-49b7-8f69-2bf1a5a7b7f6.europe-west3-0.gcp.cloud.qdrant.io"),
+        "QDRANT_API_KEY": os.getenv("QDRANT_API_KEY", ""),
+        "GROQ_API_KEY": os.getenv("GROQ_API_KEY", "")
     }
     
-    # Load from environment variables first
+    # Log which keys are set (without showing the actual values for security)
     for key in config:
-        env_value = os.getenv(key)
-        if env_value:
-            config[key] = env_value
+        if config[key]:
+            logger.info(f"Found {key} in environment")
+        else:
+            logger.warning(f"{key} not found in environment")
     
-    # Try to load from secrets.toml if environment variables are missing
-    if not config["QDRANT_URL"] or not config["QDRANT_API_KEY"]:
+    # Fallback to secrets.toml if needed (for backward compatibility)
+    if not all(config.values()):
         try:
             with open("secrets.toml", "r") as f:
                 toml_config = toml.load(f)
-                config.update(toml_config)
+                # Only update keys that aren't already set
+                for key, value in toml_config.items():
+                    if key in config and not config[key]:
+                        config[key] = value
+                logger.info("Loaded missing config from secrets.toml")
         except FileNotFoundError:
-            pass
+            logger.warning("secrets.toml not found, using environment variables only")
     
     return config
 
@@ -201,32 +279,29 @@ def load_config():
 expert_system = AyurvedaExpertSystem(load_config())
 
 def create_sse_message(data: dict) -> str:
-    """Format data as SSE message"""
     return f"data: {json.dumps(data)}\n\n"
 
 async def stream_response(response: str) -> Iterator[str]:
-    """Stream response token by token with artificial delay"""
-    words = response.split()
-    for word in words:
-        message = create_sse_message({"token": word + " "})
-        yield message
+    for word in response.split():
+        yield create_sse_message({"token": word + " "})
         await asyncio.sleep(0.05)
 
 @app.get("/")
 async def read_root(request: Request):
-    """Serve the chat interface"""
     return templates.TemplateResponse("index.html", {"request": request})
 
 @app.post("/ask/stream")
 async def stream_chat(question: Question):
-    """Stream chat responses"""
+    logger.info(f"Received question: {question.question}")
     try:
         response, docs = await expert_system.process_query(question.question)
+        logger.info(f"Generated response (first 200 chars): {response[:200]}...")
         
         headers = {
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
         }
         
         return StreamingResponse(
@@ -235,6 +310,7 @@ async def stream_chat(question: Question):
         )
         
     except Exception as e:
+        logger.error(f"Error in stream_chat: {str(e)}")
         error_msg = create_sse_message({
             "error": f"Error processing query: {str(e)}"
         })
@@ -245,4 +321,4 @@ async def stream_chat(question: Question):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=10000)
+    uvicorn.run(app, host="0.0.0.0", port=3000, log_level="info")
