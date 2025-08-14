@@ -17,7 +17,6 @@ from dotenv import load_dotenv
 from phi.agent import Agent
 from phi.model.groq import Groq
 from qdrant_client import QdrantClient
-from sentence_transformers import SentenceTransformer
 
 # Configure logging first
 logging.basicConfig(level=logging.INFO)
@@ -65,34 +64,26 @@ class VectorDBService:
         try:
             if api_url and api_key:
                 self.client = QdrantClient(url=api_url, api_key=api_key)
+                logger.info("Connected to external Qdrant instance")
             else:
-                self.client = QdrantClient(":memory:")
-            self.model = SentenceTransformer('all-MiniLM-L6-v2')
+                raise ValueError("Qdrant URL and API key are required")
+            
             self.collection_name = "myayurhealth_docs"
             
-            # Check if collection exists, if not create it
-            collections = self.client.get_collections()
-            collection_names = [collection.name for collection in collections.collections]
-            
-            if self.collection_name not in collection_names:
-                # For Qdrant 1.15.1, we need to use the full configuration
-                from qdrant_client.http.models import VectorParams, Distance
-                
-                self.client.recreate_collection(
-                    collection_name=self.collection_name,
-                    vectors_config={
-                        "text": VectorParams(
-                            size=384,  # all-MiniLM-L6-v2 uses 384 dimensions
-                            distance=Distance.COSINE
-                        )
-                    }
+            # Verify collection exists and has data
+            try:
+                collection_info = self.client.get_collection(collection_name=self.collection_name)
+                logger.info(f"Collection '{self.collection_name}' found with {collection_info.points_count} points")
+            except Exception as e:
+                logger.error(f"Collection '{self.collection_name}' not found or error accessing it: {str(e)}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Collection '{self.collection_name}' not accessible: {str(e)}"
                 )
-                logger.info(f"Created new collection: {self.collection_name}")
             
             logger.info("Vector DB initialized successfully")
         except Exception as e:
             self.client = None
-            self.model = None
             logger.error(f"Vector DB Initialization Error: {str(e)}")
             raise HTTPException(
                 status_code=500,
@@ -100,34 +91,54 @@ class VectorDBService:
             )
     
     def search(self, query: str, limit: int = 5) -> List[DocumentResponse]:
-        if not self.client or not self.model:
+        if not self.client:
             return []
         
         try:
-            query_vector = self.model.encode(query).tolist()
+            # Since we don't have the SentenceTransformer model, we'll use text-based search
+            # This assumes your Qdrant collection supports text queries or you have pre-computed embeddings
             
-            # First check if collection exists and has points
+            # Check if collection exists and has points
             collection_info = self.client.get_collection(collection_name=self.collection_name)
             if collection_info.points_count == 0:
                 logger.warning(f"Collection '{self.collection_name}' is empty. No documents to search.")
                 return []
-                
-            # Perform the search using the correct API
-            search_result = self.client.search(
+            
+            # Use scroll to get all documents and filter based on text similarity
+            # This is a simple text matching approach since we don't have embeddings
+            all_points = self.client.scroll(
                 collection_name=self.collection_name,
-                query_vector=query_vector,
-                limit=limit
-            )
+                limit=1000,  # Adjust based on your collection size
+                with_payload=True
+            )[0]  # scroll returns (points, next_page_offset)
+            
+            # Simple keyword matching
+            query_words = set(query.lower().split())
+            scored_docs = []
+            
+            for point in all_points:
+                content = point.payload.get('text', '').lower()
+                # Calculate simple word overlap score
+                content_words = set(content.split())
+                overlap = len(query_words.intersection(content_words))
+                if overlap > 0:
+                    score = overlap / len(query_words)  # Simple relevance score
+                    scored_docs.append((score, point))
+            
+            # Sort by score and take top results
+            scored_docs.sort(key=lambda x: x[0], reverse=True)
+            top_docs = scored_docs[:limit]
             
             return [
                 DocumentResponse(
-                    content=hit.payload.get('text', ''),
-                    confidence=float(hit.score) if hasattr(hit, 'score') else 0.0,
-                    metadata=hit.payload.get('metadata', {}),
-                    is_doctor_info='doctor' in hit.payload.get('metadata', {}).get('type', '').lower()
+                    content=point.payload.get('text', ''),
+                    confidence=float(score),
+                    metadata=point.payload.get('metadata', {}),
+                    is_doctor_info='doctor' in point.payload.get('metadata', {}).get('type', '').lower()
                 )
-                for hit in search_result
+                for score, point in top_docs
             ]
+            
         except Exception as e:
             logger.error(f"Search Error: {str(e)}")
             raise HTTPException(
