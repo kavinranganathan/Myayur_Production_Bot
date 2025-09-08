@@ -1,7 +1,8 @@
 fastapi
 toml
-uvicorn
+uvicorn[standard]
 phidata
 groq
 qdrant_client
 sentence_transformers
+gunicorn
